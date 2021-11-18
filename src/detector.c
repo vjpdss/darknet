@@ -17,6 +17,13 @@ typedef __compar_fn_t comparison_fn_t;
 #endif
 #endif
 
+#define ATV_TEST_FILELIST 1
+#ifdef ATV_TEST_FILELIST && ATV_TEST_FILELIST == 1
+#include <fcntl.h>
+#include <linux/limits.h>
+#include <sys/stat.h>
+#endif
+
 #include "http_stream.h"
 
 int check_mistakes = 0;
@@ -1604,6 +1611,55 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
 }
 
 
+#if defined(ATV_TEST_FILELIST) && ATV_TEST_FILELIST == 1
+
+//define function to read symbolic link from filename
+static char* readlink_sym(const char* filename) {
+    char* linkname = (char*)malloc(sizeof(char) * PATH_MAX);
+    int len = readlink(filename, linkname, PATH_MAX);
+    if (len < 0) {
+        free(linkname);
+        return NULL;
+    }
+    linkname[len] = 0;
+    return linkname;
+}
+
+//define function to open txt file for reading
+static FILE* open_file(char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "Couldn't open file %s for reading\n", filename);
+        exit(1);
+    }
+    return fp;
+}
+
+//define function to check if a filename is a symbolic link
+static int is_symlink(const char* filename) {
+    struct stat sb;
+    if (lstat(filename, &sb) == 0) {
+        if (S_ISLNK(sb.st_mode)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+//define function to check if file exists
+static int file_exists(const char* filename) {
+    struct stat sb;
+    if (lstat(filename, &sb) == 0) {
+        if (S_ISREG(sb.st_mode)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+//define function to close txt file
+static void close_file(FILE *fp) {
+    fclose(fp);
+}
+#endif
 void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh,
     float hier_thresh, int dont_show, int ext_output, int save_labels, char *outfile, int letter_box, int benchmark_layers)
 {
@@ -1642,12 +1698,47 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     }
     int j;
     float nms = .45;    // 0.4F
+#if defined(ATV_TEST_FILELIST) && ATV_TEST_FILELIST == 1
+    //open filename
+    FILE *atv_fp = open_file(filename);
+    //printf("ATV File %s OPEN\n", filename);
+#endif
     while (1) {
+#if defined ATV_TEST_FILELIST && ATV_TEST_FILELIST == 1
+        if (filename)
+        {
+            //read line from file
+            //printf("ATV Reading line...\n");
+            char *atv_line;
+            size_t atv_len = 0;
+            ssize_t atv_read;
+            if (atv_read = getline(&atv_line, &atv_len, atv_fp) == -1)
+            {
+                printf("ATV File %s EOF\n", filename);
+                close_file(atv_fp);
+                break;
+            }
+            //remove newline from atv_line if present
+            if (atv_line[strlen(atv_line) - 1] == '\n')
+            {
+                atv_line[strlen(atv_line) - 1] = '\0';
+            }
+
+            //printf("ATV Line: %s", atv_line);
+            //printf("ATV exists: %d\n", file_exists(atv_line));
+            //printf("ATV is symlink: %d\n", is_symlink(atv_line));
+            char* atv_path = readlink_sym(atv_line);
+            //printf("ATV Symlink: %s\n", atv_path);
+            strncpy(input, atv_line, 255);
+            //printf("ATV: %s\n", input);
+        }
+#else
         if (filename) {
             strncpy(input, filename, 256);
             if (strlen(input) > 0)
                 if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
         }
+#endif
         else {
             printf("Enter Image Path: ");
             fflush(stdout);
@@ -1743,8 +1834,9 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             wait_until_press_key_cv();
             destroy_all_windows_cv();
         }
-
+#if !defined(ATV_TEST_FILELIST) || ATV_TEST_FILELIST != 1
         if (filename) break;
+#endif
     }
 
     if (json_file) {
